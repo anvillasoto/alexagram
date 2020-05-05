@@ -1,0 +1,25 @@
+[{
+        "ParameterKey": "EnvironmentName",
+        "ParameterValue": "Alexagram"
+    },
+    {
+        "ParameterKey": "KeyName",
+        "ParameterValue": "alexagram-key"
+    },
+    {
+        "ParameterKey": "MinSize",
+        "ParameterValue": "2"
+    },
+    {
+        "ParameterKey": "MaxSize",
+        "ParameterValue": "4"
+    },
+    {
+        "ParameterKey": "DesiredCapacity",
+        "ParameterValue": "4"
+    },
+    {
+        "ParameterKey": "StarterCodeRepo",
+        "ParameterValue": "s3://udacity-s3/devops/udacity.zip"
+    }
+]

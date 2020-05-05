@@ -1,0 +1,269 @@
+Description: >
+  Alexander Villasoto / Alexagram 2020
+
+  This template creates load balancers that deploys EC2 instances hosting 
+  Alexagram, a web application that simulates deployment of application 
+  artifact in a scalable and secure environment with security groups, 
+  target groups and listener rules.
+
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    Type: String
+
+  KeyName:
+    Description: The EC2 Key Pair to allow SSH access to the instance
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    Default: 'alexagram-key'
+
+  DesiredCapacity:
+    Description: The desired size of the group.
+    Type: String
+    Default: '4'
+
+  MinSize:
+    Description: The minimum size of the group.
+    Type: String
+    Default: '2'
+
+  MaxSize:
+    Description: The maximum size of the group.
+    Type: String
+    Default: '4'
+
+  StarterCodeRepo:
+    Description: S3 path and file name of starter code to be used in server deployments
+    Type: String
+    Default: 's3://udacity-s3/devops/udacity.zip'
+
+Resources:
+  LBSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for load-balancer
+      VpcId:
+        Fn::ImportValue: !Sub "${EnvironmentName}-VPCID"
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+
+  WebServerSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for web server
+      VpcId:
+        Fn::ImportValue: !Sub "${EnvironmentName}-VPCID"
+      SecurityGroupIngress:
+      - SourceSecurityGroupId: !Ref LBSecGroup
+        IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+      - SourceSecurityGroupId: !Ref BastionSecGroup
+        IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+
+  BastionSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for bastion server
+      VpcId:
+        Fn::ImportValue: !Sub "${EnvironmentName}-VPCID"
+      SecurityGroupIngress:
+      - CidrIp: 0.0.0.0/0
+        IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName} Bastion Security Group"
+
+  WebAppLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          sudo apt-get update -y
+          sudo apt-get install awscli -y
+          sudo apt-get install apache2 -y
+          sudo apt-get install unzip -y
+          cd /var/www/html
+          sudo aws s3 cp ${StarterCodeRepo} ./
+          sudo unzip -o udacity.zip
+          sudo systemctl start apache2.service
+      ImageId: ami-07b4f3c02c7f83d59
+      KeyName: !Ref KeyName
+      IamInstanceProfile: !Ref ListBucketInstanceProfile
+      SecurityGroups: 
+      - Ref: WebServerSecGroup  
+      InstanceType: t3.medium
+      BlockDeviceMappings:
+      - DeviceName: "/dev/sdk"
+        Ebs:
+          VolumeSize: "10"
+  
+  WebAppTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 5
+      VpcId:
+        Fn::ImportValue: 
+          Fn::Sub: "${EnvironmentName}-VPCID"
+
+  WebAppGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier:
+      - Fn::ImportValue: !Sub "${EnvironmentName}-PRIV-NETS"
+      LaunchConfigurationName: 
+        !Ref WebAppLaunchConfig
+      DesiredCapacity: !Ref DesiredCapacity
+      MinSize: !Ref MinSize
+      MaxSize: !Ref MaxSize
+      # MetricsCollection:
+      #   - Granularity: "1Minute"
+      #     Metrics:
+      #       - "GroupMinSize"
+      #       - "GroupMaxSize"
+      TargetGroupARNs:
+      - Ref: "WebAppTargetGroup"
+
+  WebAppLB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Subnets:
+      - Fn::ImportValue: !Sub "${EnvironmentName}-PUB-SN-1"
+      - Fn::ImportValue: !Sub "${EnvironmentName}-PUB-SN-2"
+      SecurityGroups:
+      - Ref: LBSecGroup
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - Type: "forward"
+        TargetGroupArn: !Ref WebAppTargetGroup
+      LoadBalancerArn: !Ref WebAppLB
+      Port: "80"
+      Protocol: "HTTP"
+
+  ALBListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+      - Type: "forward"
+        TargetGroupArn: !Ref WebAppTargetGroup
+      Conditions:
+      - Field: "path-pattern"
+        Values: ["/"]
+      ListenerArn: !Ref Listener
+      Priority: "1"
+
+  BastionPublicSubnet1:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-06f2f779464715dc5
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      SubnetId:
+        Fn::ImportValue: 
+          Fn::Sub: "${EnvironmentName}-PUB-SN-1"
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      SecurityGroupIds:
+        - Ref: BastionSecGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Bastion Host 1
+
+  BastionPublicSubnet2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-06f2f779464715dc5
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      SubnetId:
+        Fn::ImportValue: 
+          Fn::Sub: "${EnvironmentName}-PUB-SN-2"
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      SecurityGroupIds:
+        - Ref: BastionSecGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Bastion Host 2
+
+  ListBucketInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+      - Ref: S3BucketRole
+
+  S3BucketRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+
+  S3BucketPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: S3BucketPolicy
+      PolicyDocument:
+        Statement:
+        - Effect: Allow
+          Action:
+          - s3:List*
+          - s3:GetObject
+          Resource: "*"
+      Roles:
+      - Ref: S3BucketRole
+
+
+Outputs:
+  LoadBalancerDNSName:
+    Description: Web application DNS name
+    Value: !Join [ "", [ "http://", !GetAtt WebAppLB.DNSName ] ]
+    Export:
+      Name: !Sub "${EnvironmentName}-DNS-NAME"
+
+  BastionHostIPPublicSubnet1:
+    Description: Bastion host in public subnet 1 IP address
+    Value: !GetAtt BastionPublicSubnet1.PublicIp
+    Export:
+      Name: !Sub "${EnvironmentName}-BASTION-HOST-IP-PUB-SN-1"
+
+  BastionHostIPPublicSubnet2:
+    Description: Bastion host in public subnet 2 IP address
+    Value: !GetAtt BastionPublicSubnet2.PublicIp
+    Export:
+      Name: !Sub "${EnvironmentName}-BASTION-HOST-IP-PUB-SN-2"
+
+  BastionHostDNSPublicSubnet1:
+    Description: Bastion host in public subnet 1 DNS address
+    Value: !GetAtt BastionPublicSubnet1.PublicDnsName
+    Export:
+      Name: !Sub "${EnvironmentName}-BASTION-HOST-DNS-PUB-SN-1"
+
+  BastionHostDNSPublicSubnet2:
+    Description: Bastion host in public subnet 2 DNS address
+    Value: !GetAtt BastionPublicSubnet2.PublicDnsName
+    Export:
+      Name: !Sub "${EnvironmentName}-BASTION-HOST-DNS-PUB-SN-2"

@@ -26,9 +26,10 @@ You can access the deployed website through [this](http://alexa-webap-12o2vzr15c
   
 ![creating key pair](./images/creating_key_pair.png)
 
-  a. If you use a different name like the one shown above, you must update the alexagram-infra-params.json with the name that you supplied in the form above.
+If you use a different name like the one shown above, you must update the alexagram-infra-params.json with the name that you supplied in the form above.
 
 2. Run the following commands:
 
   __./create.sh alexagram-servers alexagram-infra.yaml alexagram-infra-params.json__
+
   __./create.sh alexagram-servers alexagram-servers.yaml alexagram-servers-params.json__

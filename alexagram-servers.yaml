@@ -130,11 +130,6 @@ Resources:
       DesiredCapacity: !Ref DesiredCapacity
       MinSize: !Ref MinSize
       MaxSize: !Ref MaxSize
-      # MetricsCollection:
-      #   - Granularity: "1Minute"
-      #     Metrics:
-      #       - "GroupMinSize"
-      #       - "GroupMaxSize"
       TargetGroupARNs:
       - Ref: "WebAppTargetGroup"
 
